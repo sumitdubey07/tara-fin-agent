@@ -7,7 +7,7 @@ const app = express();
 app.use(express.json());
 const logs: any[] = [];
 
-const SYSTEM_PROMPT = `You are Tara, a personal finance research assistant. Today is June 4, 2026. The financial data covers January 2024 to March 2025.
+const SYSTEM_PROMPT = `You are Tara, a personal finance research assistant. Today is June 6, 2026. The financial data covers January 2024 to March 2025.
 
 You MUST ALWAYS call a tool before responding. Never answer without calling a tool first.
 
@@ -191,7 +191,7 @@ async function runFundQuery(args: any) {
        ORDER BY return_pct DESC`, params);
     const rows = r.rows;
     if (rows.length > 1) {
-      return { rows, best: rows[0], worst: rows[rows.length-1], spread: Math.round((rows[0].return_pct - rows[rows.length-1].return_pct)*100)/100 };
+      return { rows, best: rows[0], worst: rows[rows.length-1], spread: Math.round((Number(rows[0].return_pct) - Number(rows[rows.length-1].return_pct))*100)/100 };
     }
     return { rows };
   }
@@ -232,32 +232,34 @@ async function runFundQuery(args: any) {
   return { error: "unknown mode" };
 }
 
-async function callGroq(messages: any[], retries = 3): Promise<any> {
-  for (let attempt = 0; attempt < retries; attempt++) {
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
-        messages,
-        tools: TOOLS,
-        tool_choice: "auto",
-        max_tokens: 2048,
-      }),
-    });
-    const data = await response.json();
-    if (response.status === 429) {
-      const wait = (attempt + 1) * 3000;
-      console.log(`Rate limited, waiting ${wait/1000}s...`);
-      //await new Promise(r => setTimeout(r, wait));
-      continue;
-    }
-    return data;
+// NO RETRIES — one call only, return error message if rate limited
+async function callGroq(messages: any[]): Promise<any> {
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "llama-3.3-70b-versatile",
+      messages,
+      tools: TOOLS,
+      tool_choice: "auto",
+      max_tokens: 2048,
+    }),
+  });
+
+  if (response.status === 429) {
+    console.log("Rate limited by Groq");
+    return { choices: [{ message: { content: "I am currently rate limited. Please try again in 30 seconds." } }] };
   }
-  return { choices: [{ message: { content: "Rate limit reached, please try again in a minute." } }] };
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Groq API error ${response.status}: ${errText}`);
+  }
+
+  return response.json();
 }
 
 app.post("/ask", async (req, res) => {
@@ -280,6 +282,7 @@ app.post("/ask", async (req, res) => {
     ];
 
     let answer = "";
+
     for (let step = 0; step < 5; step++) {
       const data = await callGroq(messages);
       const msg = data.choices?.[0]?.message;
@@ -304,7 +307,7 @@ app.post("/ask", async (req, res) => {
               toolResult = { error: "unknown tool" };
             }
           } catch (toolErr: any) {
-            console.error(`[${requestId}] Tool error:`, toolErr.message, toolErr.stack);;
+            console.error(`[${requestId}] Tool error:`, toolErr.message);
             toolResult = { error: toolErr.message };
           }
 
@@ -316,17 +319,6 @@ app.post("/ask", async (req, res) => {
         }
       } else {
         answer = msg.content || "";
-        // If answer is empty but tools were called, force a summary
-        if (!answer && toolsCalled.length > 0) {
-          const summaryMessages = [
-            ...messages,
-            { role: "user", content: "Based on the tool results above, please provide a clear answer to the original question. Include the actual numbers from the data." }
-          ];
-          const summaryData = await callGroq(summaryMessages.map((m: any) => 
-            m.role === "tool" ? { ...m, role: "tool" } : m
-          ));
-          answer = summaryData.choices?.[0]?.message?.content || "I retrieved the data but could not format a response.";
-        }
         break;
       }
     }
