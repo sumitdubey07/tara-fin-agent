@@ -74,7 +74,7 @@ async function runEval() {
   let failed = 0;
 
   for (const test of tests) {
-    await new Promise(r => setTimeout(r, 2000));
+    await new Promise(r => setTimeout(r, 5000));
     try {
       const start = Date.now();
       const res = await fetch(`${BASE_URL}/ask`, {

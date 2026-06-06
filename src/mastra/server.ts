@@ -7,6 +7,30 @@ const app = express();
 app.use(express.json());
 const logs: any[] = [];
 
+// ─── Fix 1: Safe arg parser ───────────────────────────────────────────────────
+// Groq's llama-3.1-8b-instant (and sometimes 70b) produces:
+//   - Python booleans: False / True / None
+//   - Stringified booleans: "false" / "true"
+//   - Stringified nulls: "null" / ""
+// This normalises all of the above before the args reach the tool handlers.
+function safeParseArgs(raw: string): Record<string, unknown> {
+  const fixed = raw
+    .replace(/:\s*False\b/g, ": false")
+    .replace(/:\s*True\b/g, ": true")
+    .replace(/:\s*None\b/g, ": null");
+
+  const parsed = JSON.parse(fixed); // throws on completely malformed JSON → caught upstream
+
+  for (const key of Object.keys(parsed)) {
+    const v = parsed[key];
+    if (v === "false" || v === "False") parsed[key] = false;
+    else if (v === "true"  || v === "True")  parsed[key] = true;
+    else if (v === "null"  || v === "")      parsed[key] = null;
+  }
+  return parsed;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 const SYSTEM_PROMPT = `You are Tara, a personal finance research assistant. Today is June 6, 2026. The financial data covers January 2024 to March 2025.
 
 You MUST ALWAYS call a tool before responding. Never answer without calling a tool first.
@@ -232,7 +256,9 @@ async function runFundQuery(args: any) {
   return { error: "unknown mode" };
 }
 
-// NO RETRIES — one call only, return error message if rate limited
+// ─── Fix 2: Upgraded model ────────────────────────────────────────────────────
+// llama-3.1-8b-instant is too small for reliable tool use — it generates
+// malformed JSON and Python-style booleans. 70b-versatile is far more reliable.
 async function callGroq(messages: any[]): Promise<any> {
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
@@ -241,10 +267,10 @@ async function callGroq(messages: any[]): Promise<any> {
       "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
     },
     body: JSON.stringify({
-      model: "llama-3.3-70b-versatile",
+      model: "llama-3.3-70b-versatile", // was: llama-3.1-8b-instant
       messages,
       tools: TOOLS,
-      tool_choice: "auto",
+      tool_choice: "required",
       max_tokens: 2048,
     }),
   });
@@ -261,6 +287,7 @@ async function callGroq(messages: any[]): Promise<any> {
 
   return response.json();
 }
+// ─────────────────────────────────────────────────────────────────────────────
 
 app.post("/ask", async (req, res) => {
   const requestId = `req_${Date.now()}`;
@@ -291,9 +318,22 @@ app.post("/ask", async (req, res) => {
       messages.push(msg);
 
       if (msg.tool_calls && msg.tool_calls.length > 0) {
+        // ─── Fix 3: Safe arg parsing with retry on malformed JSON ────────────
         for (const tc of msg.tool_calls) {
           const fnName = tc.function.name;
-          const fnArgs = JSON.parse(tc.function.arguments);
+
+          let fnArgs: Record<string, unknown>;
+          try {
+            fnArgs = safeParseArgs(tc.function.arguments);
+          } catch (parseErr: any) {
+            // Groq produced completely malformed JSON (e.g. <function=...> format)
+            // Remove the bad assistant message and retry the turn
+            console.warn(`[${requestId}] Malformed tool args on step ${step}, retrying... (${parseErr.message})`);
+            messages.pop();
+            break; // break out of tc loop → outer for-loop retries the step
+          }
+          // ─────────────────────────────────────────────────────────────────
+
           console.log(`[${requestId}] Tool: ${fnName}`, JSON.stringify(fnArgs).substring(0, 200));
           toolsCalled.push({ tool: fnName, input: fnArgs });
 
