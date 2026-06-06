@@ -6,14 +6,11 @@ import { Pool } from "pg";
 // const DB_URL = process.env.DATABASE_URL?.includes("render.com")
 //   ? process.env.DATABASE_URL
 //   : "postgresql://postgres:postgres@localhost:5432/provue_tara";
+const RENDER_URL = "postgresql://tara_db_blvo_user:Qvg8FfhYz0B5f10wfwW5b1GsubHeDLyk@dpg-d8hsqc67r5hc73c8rq3g-a.singapore-postgres.render.com/tara_db_blvo";
 
 const pool = new Pool({
-  host: "localhost",
-  port: 5432,
-  user: "postgres",
-  password: "postgres",
-  database: "provue_tara",
-  ssl: false,
+  connectionString: RENDER_URL,
+  ssl: { rejectUnauthorized: false },
 });
 
 const DATA_DIR = process.env.DATA_DIR || "./data/sample_a";
