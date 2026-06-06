@@ -1,30 +1,47 @@
-# tara-agent
+# Tara — Personal Finance Research Agent
 
-Welcome to your new [Mastra](https://mastra.ai/) project! We're excited to see what you'll build.
+AI agent that answers natural-language questions about personal finances using a Postgres database.
 
-## Getting Started
+## Deployed URL
+https://tara-agent-n1x0.onrender.com
 
-Start the development server:
-
-```shell
-npm run dev
+## Test it
+```bash
+curl -X POST https://tara-agent-n1x0.onrender.com/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "How much did I spend on food in January 2024?"}'
 ```
 
-Open [http://localhost:4111](http://localhost:4111) in your browser to access [Mastra Studio](https://mastra.ai/docs/studio/overview). It provides an interactive UI for building and testing your agents, along with a REST API that exposes your Mastra application as a local service. This lets you start building without worrying about integration right away.
+## Local Setup
 
-You can start editing files inside the `src/mastra` directory. The development server will automatically reload whenever you make changes.
+1. Install Node 18+
+2. Clone repo: `git clone https://github.com/sumitdubey07/tara-fin-agent.git`
+3. Install: `npm install`
+4. Create `.env`:
 
-## Learn more
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/provue_tara
+GROQ_API_KEY=your-key-here
 
-To learn more about Mastra, visit our [documentation](https://mastra.ai/docs/). Your bootstrapped project includes example code for [agents](https://mastra.ai/docs/agents/overview), [tools](https://mastra.ai/docs/agents/using-tools), [workflows](https://mastra.ai/docs/workflows/overview), [scorers](https://mastra.ai/docs/evals/overview), and [observability](https://mastra.ai/docs/observability/overview).
+5. Start Postgres (Docker): `docker run -d --name provue-pg -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:16`
+6. Create DB: `psql -U postgres -c "CREATE DATABASE provue_tara;"`
+7. Create tables: `psql -U postgres -d provue_tara -f src/mastra/db/schema.sql`
+8. Ingest data: `DATA_DIR=./data/sample_a npx tsx src/mastra/scripts/ingest.ts`
+9. Start server: `npm start`
+10. Test: `curl -X POST http://localhost:3000/ask -H "Content-Type: application/json" -d '{"question":"How much did I spend on food?"}'`
 
-If you're new to AI agents, check out our [course](https://mastra.ai/learn) and [YouTube videos](https://youtube.com/@mastra-ai). You can also join our [Discord](https://discord.gg/BTYqqHKUrf) community to get help and share your projects.
+## Run Evals
+```bash
+npx tsx scripts/eval.ts
+```
 
-## Deploy to the Mastra platform
+## Model
+Groq — llama-3.3-70b-versatile
 
-The [Mastra platform](https://projects.mastra.ai) provides two products for deploying and managing AI applications built with the Mastra framework:
+## Deployment
+- App: Render.com Web Service (Singapore, free tier)
+- Database: Render Postgres (Singapore, free tier)
 
-- **Studio**: A hosted visual environment for testing agents, running workflows, and inspecting traces
-- **Server**: A production deployment target that runs your Mastra application as an API server
-
-Learn more in the [Mastra platform documentation](https://mastra.ai/docs/mastra-platform/overview).
+## Known Limitations
+- Free tier cold start: first request may take 30-60 seconds
+- Groq free tier rate limits: retry after 60 seconds if you get rate limit error
+- Data covers January 2024 to March 2025 only
